@@ -132,4 +132,7 @@ def settle_open_paper_trades(db, client, risk, max_per_run: int = 200) -> dict:
         else:
             stats["still_open"] += 1
 
+    if stats["settled"] or stats["stale_closed"]:
+        db.commit()
+
     return stats
