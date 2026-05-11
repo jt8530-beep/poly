@@ -1,18 +1,13 @@
 """
-Main loop for the arb engine.
+Main loop for the arb engine (v1 paper-safe).
 
-Flow (paper mode):
-  while True:
-    1. pull all active events
-    2. for each ladder-like event, fetch top-of-book
-    3. detect violations -> LadderSignal[]
-    4. risk.check_signal()
-    5. if ok: record_signal(), record_paper_trade() (both legs), TG notify
-    6. sleep(scan_interval_sec)
-
-Live mode adds: sign and submit real orders through clob.polymarket.com.
-We intentionally STOP before live execution in this v0 -- executor.py has
-stubs. You'll flip PAPER_MODE=false only after a week of paper data.
+Changes vs v0:
+  * Both paper legs use the SAME q_shares (from ladder.v1 signal).
+  * Paper legs are BUY orders (BUY NO + BUY YES), no naked SELL.
+  * Risk counts distinct SIGNALS per day (not legs).
+  * Risk state is refreshed from DB at top of each scan (survives restarts).
+  * Paper settler runs at the top of each loop to close resolved positions.
+  * Telegram uses HTML parse_mode.
 """
 from __future__ import annotations
 import json
@@ -25,6 +20,7 @@ from datetime import datetime, timezone
 from . import config as _config
 from . import ladder as _ladder
 from . import ledger as _ledger
+from . import settler as _settler
 from .poly_client import PolyClient
 from .risk import RiskManager
 from .tg_notifier import Notifier
@@ -37,69 +33,89 @@ def _now_iso() -> str:
 def run_once(cfg, client, db, risk, tg, seen_fingerprints: set) -> dict:
     """One scan pass. Returns small stats dict."""
     t0 = time.time()
+
+    # 0) keep risk counters fresh; close resolved/stale paper trades
+    risk.refresh_from_db()
+    try:
+        settle_stats = _settler.settle_open_paper_trades(db, client, risk)
+    except Exception as e:
+        logging.warning("settler error: %s", e)
+        settle_stats = {}
+
+    # 1) pull events + filter to ladder-likes
     events = client.list_all_active_events(page_size=500, hard_cap=3000)
-    # filter ladder-ish by market count early (cheaper than parsing)
     events = [e for e in events if len(e.get("markets") or []) >= 3]
 
-    stats = {"events_scanned": len(events), "signals": 0, "executed_paper": 0, "skipped_risk": 0}
+    stats = {
+        "events_scanned": len(events),
+        "signals": 0, "executed_paper": 0, "skipped_risk": 0,
+        "settled": settle_stats.get("settled", 0),
+        "stale_closed": settle_stats.get("stale_closed", 0),
+    }
 
     for ev in events:
         try:
             sigs = _ladder.scan_event(
                 client, ev,
                 min_edge_bps=cfg.ladder_min_violation_bps,
-                min_depth_usd=cfg.ladder_min_depth_usd,
+                min_notional_usd=cfg.ladder_min_depth_usd,
+                max_notional_per_leg=cfg.risk.max_notional_per_trade,
             )
         except Exception as e:
             logging.warning("scan_event error: %s", e)
             continue
 
         for s in sigs:
-            # dedup: don't fire the same pair twice in a row
-            fp = (s.event_slug, s.leg_a_market.market_id, s.leg_b_market.market_id, s.edge_bps // 50)
+            # dedup (event, pair, coarse edge bucket)
+            fp = (s.event_slug, s.leg_a.market_id, s.leg_b.market_id, s.edge_bps // 50)
             if fp in seen_fingerprints:
                 continue
             seen_fingerprints.add(fp)
 
             stats["signals"] += 1
-            notional = min(s.max_size_usd, cfg.risk.max_notional_per_trade)
-            ok, why = risk.check_signal(notional)
+
+            total_notional = s.max_size_usd
+            ok, why = risk.check_signal(total_notional)
             if not ok:
                 stats["skipped_risk"] += 1
                 logging.info("risk skip: %s  (%s)", why, s.event_slug)
                 continue
 
-            # record signal
+            # --- record signal (structured)
             raw = json.dumps({
-                "event_slug": s.event_slug, "edge_bps": s.edge_bps,
-                "exp_profit": s.expected_profit_usd, "max_size": s.max_size_usd,
-                "leg_a_q": s.leg_a_market.question, "leg_b_q": s.leg_b_market.question,
+                "event_slug": s.event_slug,
+                "edge_bps": s.edge_bps,
+                "exp_profit": s.expected_profit_usd,
+                "max_size": s.max_size_usd,
+                "q_shares": s.q_shares,
+                "leg_a_q": s.leg_a.question,
+                "leg_b_q": s.leg_b.question,
             })
             sid = _ledger.record_signal(db, "ladder_C", s, raw, _now_iso())
 
-            # paper "execute" both legs
             if cfg.paper_mode:
-                # leg A = SELL YES at best_bid  (sell the overpriced one)
+                # both legs are BUY orders, same q_shares
                 _ledger.record_paper_trade(
-                    db, _now_iso(), sid, s.leg_a_market.market_id,
-                    "SELL", "YES",
-                    price=s.leg_a_market.best_bid_yes or 0.0,
-                    size=notional / max(s.leg_a_market.best_bid_yes or 1e-6, 1e-6),
-                    note=s.leg_a_action,
+                    db, _now_iso(), sid,
+                    s.leg_a.market_id, s.leg_a.token_id,
+                    "BUY", s.leg_a.token_outcome,
+                    price=s.leg_a.price,
+                    size_shares=s.leg_a.size_shares,
+                    note=s.leg_a.action_str,
                 )
-                # leg B = BUY YES at best_ask
                 _ledger.record_paper_trade(
-                    db, _now_iso(), sid, s.leg_b_market.market_id,
-                    "BUY", "YES",
-                    price=s.leg_b_market.best_ask_yes or 0.0,
-                    size=notional / max(s.leg_b_market.best_ask_yes or 1e-6, 1e-6),
-                    note=s.leg_b_action,
+                    db, _now_iso(), sid,
+                    s.leg_b.market_id, s.leg_b.token_id,
+                    "BUY", s.leg_b.token_outcome,
+                    price=s.leg_b.price,
+                    size_shares=s.leg_b.size_shares,
+                    note=s.leg_b.action_str,
                 )
-                risk.on_new_trade(notional)
+                # ONE signal, ONE risk increment (total notional, not per leg)
+                risk.on_new_signal_opened(total_notional)
                 stats["executed_paper"] += 1
                 tg.signal(s, "ladder_C", paper=True)
             else:
-                # live execution - kept OFF until executor.py is hardened
                 logging.warning("LIVE mode not implemented yet; signal dropped (safety)")
 
     stats["elapsed_sec"] = round(time.time() - t0, 2)
@@ -109,7 +125,7 @@ def run_once(cfg, client, db, risk, tg, seen_fingerprints: set) -> dict:
 def main(argv: list[str] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser()
-    ap.add_argument("--once", action="store_true", help="single scan, then exit (useful for cron/tests)")
+    ap.add_argument("--once",  action="store_true", help="single scan, then exit")
     ap.add_argument("--paper", action="store_true", help="force paper mode (default on)")
     args = ap.parse_args(argv)
 
@@ -121,9 +137,8 @@ def main(argv: list[str] | None = None) -> int:
         level=getattr(logging, cfg.log_level.upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
-
     log = logging.getLogger("engine")
-    log.info("starting engine  paper=%s  scan_interval=%ss  min_edge_bps=%s",
+    log.info("starting engine (v1)  paper=%s  scan_interval=%ss  min_edge_bps=%s",
              cfg.paper_mode, cfg.scan_interval_sec, cfg.ladder_min_violation_bps)
 
     client = PolyClient(cfg.poly.gamma_url, cfg.poly.clob_url)
@@ -131,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     risk   = RiskManager(cfg, db)
     tg     = Notifier(cfg.tg.bot_token, cfg.tg.chat_id, cfg.tg.enabled)
 
-    tg.send(f"engine started, paper={cfg.paper_mode}, min_edge={cfg.ladder_min_violation_bps}bps")
+    tg.send(f"engine v1 started, paper={cfg.paper_mode}, min_edge={cfg.ladder_min_violation_bps}bps")
 
     _stop = {"flag": False}
     def _handle(sig, frame):
@@ -147,7 +162,6 @@ def main(argv: list[str] | None = None) -> int:
             stats = run_once(cfg, client, db, risk, tg, seen)
             log.info("scan done  %s", stats)
             loop_i += 1
-            # periodic heartbeat, keep seen set bounded
             if loop_i % 20 == 0:
                 tg.heartbeat(json.dumps(stats))
                 seen.clear()
