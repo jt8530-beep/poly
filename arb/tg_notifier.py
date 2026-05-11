@@ -1,11 +1,25 @@
-"""Telegram notifications via Bot API.
+"""
+Telegram notifications via Bot API.
 
-Zero deps: urllib only. If bot_token / chat_id unset, becomes a no-op.
+v1: switched from Markdown (fragile with _ [ ] ` in slugs/questions) to
+HTML parse_mode with proper escaping. All user-supplied strings go
+through _esc(). Zero third-party deps.
 """
 from __future__ import annotations
-import json, logging, urllib.parse, urllib.request
+import json
+import logging
+import urllib.parse
+import urllib.request
 
 log = logging.getLogger("tg")
+
+
+def _esc(s: str) -> str:
+    if s is None: return ""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
 
 
 class Notifier:
@@ -14,9 +28,9 @@ class Notifier:
         self.chat_id = chat_id
         self.enabled = enabled and bool(bot_token) and bool(chat_id)
 
-    def send(self, text: str, parse_mode: str = "Markdown") -> bool:
+    def send(self, text: str, parse_mode: str = "HTML") -> bool:
         if not self.enabled:
-            log.debug("tg disabled, would have sent: %s", text[:120])
+            log.debug("tg disabled, would have sent: %s", text[:200])
             return False
         url = f"https://api.telegram.org/bot{self.token}/sendMessage"
         payload = urllib.parse.urlencode({
@@ -25,12 +39,13 @@ class Notifier:
             "parse_mode": parse_mode,
             "disable_web_page_preview": "true",
         }).encode()
-        req = urllib.request.Request(url, data=payload,
-            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
         try:
             with urllib.request.urlopen(req, timeout=8) as r:
-                body = r.read()
-                j = json.loads(body.decode("utf-8","replace"))
+                j = json.loads(r.read().decode("utf-8", "replace"))
                 return bool(j.get("ok"))
         except Exception as e:
             log.warning("tg send failed: %s", e)
@@ -39,19 +54,22 @@ class Notifier:
     def signal(self, sig, strategy: str, paper: bool):
         mode = "PAPER" if paper else "LIVE"
         msg = (
-          f"*[{mode}] {strategy} signal*  edge *{sig.edge_bps} bps*\n"
-          f"event: `{sig.event_slug}`\n"
-          f"{sig.event_title[:120]}\n\n"
-          f"leg A ({sig.leg_a_market.question[:60]}): `{sig.leg_a_action}`\n"
-          f"leg B ({sig.leg_b_market.question[:60]}): `{sig.leg_b_action}`\n\n"
-          f"expected profit: *${sig.expected_profit_usd:.2f}*  "
-          f"max size: ${sig.max_size_usd:.2f}\n"
-          f"_{sig.notes}_"
+          f"<b>[{_esc(mode)}] {_esc(strategy)}</b>  edge <b>{sig.edge_bps} bps</b>\n"
+          f"event: <code>{_esc(sig.event_slug)}</code>\n"
+          f"{_esc(sig.event_title[:140])}\n\n"
+          f"leg A: <code>{_esc(sig.leg_a.action_str)}</code>\n"
+          f"     on: {_esc(sig.leg_a.question[:80])}\n"
+          f"leg B: <code>{_esc(sig.leg_b.action_str)}</code>\n"
+          f"     on: {_esc(sig.leg_b.question[:80])}\n\n"
+          f"shared q = <b>{sig.q_shares:.2f}</b> shares\n"
+          f"capital in: <b>${sig.max_size_usd:.2f}</b>   "
+          f"expected profit: <b>${sig.expected_profit_usd:.2f}</b>\n"
+          f"<i>{_esc(sig.notes)}</i>"
         )
         self.send(msg)
 
     def heartbeat(self, summary: str):
-        self.send(f"`hb` {summary}")
+        self.send(f"<code>hb</code> {_esc(summary)}")
 
     def halt(self, reason: str):
-        self.send(f"*HALT*: {reason}")
+        self.send(f"<b>HALT</b>: {_esc(reason)}")
