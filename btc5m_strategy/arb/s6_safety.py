@@ -1,4 +1,4 @@
-"""S6 safety helpers for BTC5M strategy.
+"""S6/S6.1 safety helpers for BTC5M strategy.
 
 Pure helper functions only. No credentials. No live order submission.
 """
@@ -64,6 +64,33 @@ def shock_filter_reason(
     return None, stats
 
 
+def entry_exit_zone_reason(
+    seconds_left: float,
+    *,
+    dynamic_exit_enabled: bool = True,
+    exit1_sec: int = 120,
+    buffer_sec: int = 20,
+) -> tuple[str | None, dict]:
+    """Block new entries that would start inside, or too close to, the exit zone.
+
+    S6.0 allowed entries with MIN_SECONDS_BEFORE_END=90 while dynamic exits began
+    at 120 seconds. That can open a position directly inside the loss-management
+    zone and then close it seconds later. S6.1 makes this impossible even when
+    environment variables are misconfigured.
+    """
+    threshold = int(exit1_sec) + int(buffer_sec)
+    payload = {
+        "seconds_left": float(seconds_left),
+        "dynamic_exit_enabled": bool(dynamic_exit_enabled),
+        "exit1_sec": int(exit1_sec),
+        "buffer_sec": int(buffer_sec),
+        "entry_block_threshold_sec": threshold,
+    }
+    if dynamic_exit_enabled and float(seconds_left) <= threshold:
+        return "inside_exit_zone", payload
+    return None, payload
+
+
 def dynamic_exit_reason(
     seconds_left: float,
     pnl_usd: float,
@@ -72,9 +99,10 @@ def dynamic_exit_reason(
     *,
     min_exit_bid_depth: float = 25.0,
     exit1_sec: int = 120,
-    exit1_min_loss: float = 0.15,
-    exit2_sec: int = 90,
-    exit3_sec: int = 60,
+    exit1_min_loss: float = 0.25,
+    exit2_sec: int = 60,
+    exit2_min_loss: float = 0.12,
+    exit3_sec: int = 30,
 ) -> tuple[str | None, dict]:
     bid_depth_ok = bid_size is not None and float(bid_size) >= float(min_exit_bid_depth)
     loss_frac = (-float(pnl_usd) / float(notional_usd)) if notional_usd > 0 and pnl_usd < 0 else 0.0
@@ -86,11 +114,16 @@ def dynamic_exit_reason(
         "bid_size": bid_size,
         "min_exit_bid_depth": float(min_exit_bid_depth),
         "bid_depth_ok": bid_depth_ok,
+        "exit1_sec": int(exit1_sec),
+        "exit1_min_loss": float(exit1_min_loss),
+        "exit2_sec": int(exit2_sec),
+        "exit2_min_loss": float(exit2_min_loss),
+        "exit3_sec": int(exit3_sec),
     }
     if seconds_left <= exit1_sec and loss_frac >= exit1_min_loss and bid_depth_ok:
         return "dynamic_loss_120", payload
-    if seconds_left <= exit2_sec and pnl_usd < 0 and bid_depth_ok:
-        return "dynamic_loss_90", payload
+    if seconds_left <= exit2_sec and loss_frac >= exit2_min_loss and bid_depth_ok:
+        return "dynamic_loss_60", payload
     if seconds_left <= exit3_sec:
         return ("dynamic_tail_liquid" if bid_depth_ok else "liquidity_trapped"), payload
     return None, payload
