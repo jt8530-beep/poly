@@ -14,7 +14,7 @@ The live version is layered:
    - chosen-side `ask_size >= 25`
 
 3. Edge gate third
-   - `edge >= 600 bps`
+   - `edge >= 500 bps`
    - normal price / spread / depth checks still apply
 
 4. Exit control last
@@ -33,7 +33,7 @@ The live version is layered:
 - `BTC5M_TAIL_FORCE_EXIT_SEC=60`
 - `BTC5M_MIN_SECONDS_AFTER_START=60`
 - `BTC5M_MIN_SECONDS_BEFORE_END=45`
-- `BTC5M_MIN_EDGE_BPS=600`
+- `BTC5M_MIN_EDGE_BPS=500`
 - `BTC5M_MAX_SPREAD_PCT=0.03`
 - `BTC5M_MAX_ENTRY_PRICE=0.82`
 - `BTC5M_MIN_ASK_DEPTH_SHARES=10`
