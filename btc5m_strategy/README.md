@@ -1,59 +1,49 @@
 # BTC5m Strategy
 
-当前维护的是 Polymarket `BTC Up/Down 5m` 纸上策略。
+Current live paper strategy for Polymarket `BTC Up/Down 5m`.
 
-这版策略的目标很直接：
+The live version is layered:
 
-- 只在有足够 edge 的时候进场
-- 用 Binance BTCUSDT 现货做外部价格锚
-- 用更紧的尾盘亏损梯度替代宽止损，避免很多仓位直接走到结算 `-10`
+1. Trend gate first
+   - 2-minute BTC momentum chooses `UP`, `DOWN`, or skip
+   - If the trend is `UP`, only the `UP` side is eligible
+   - If the trend is `DOWN`, only the `DOWN` side is eligible
 
-## 当前入场规则
+2. Entry exitability second
+   - chosen-side `spread_pct <= 1.45%`
+   - chosen-side `ask_size >= 25`
 
-- 距开盘至少 `45s`
-- 距结束至少 `45s`
-- 同时最多 `1` 个持仓
-- `edge >= 700 bps`
-- `spread <= 4%`
-- `ask depth >= 10 shares`
-- `edge < 1000 bps` 时，`direction >= 4 bps`
-- `edge >= 1000 bps` 时，`direction >= 0 bps`
-- 单笔名义金额限制在 `$5 ~ $10`
+3. Edge gate third
+   - `edge >= 600 bps`
+   - normal price / spread / depth checks still apply
 
-## 当前出场规则
+4. Exit control last
+   - `tail_force_exit_sec = 60`
+   - pre-settle loss ladder stays on
+   - `take_profit = 20%`
+   - `stop_loss` is disabled by default in the current live setup
 
-默认启用的是“尾盘亏损梯度”，而不是宽止损：
+## Current live parameters
 
-- `<=150s` 且仍亏 `>=60%`：平仓
-- `<=120s` 且仍亏 `>=50%`：平仓
-- `<=90s` 且仍亏 `>=40%`：平仓
-- `<=60s` 且仍亏 `>=30%`：平仓
-- `<=30s` 且仍亏 `>=20%`：平仓
-- `<=10s` 且仍亏 `>=0%`：平仓
+- `BTC5M_TREND_GATE_ENABLED=1`
+- `BTC5M_TREND_LOOKBACK_MIN=2`
+- `BTC5M_TREND_THRESHOLD_BPS=0`
+- `BTC5M_ENTRY_EXITABILITY_MAX_SPREAD_PCT=0.0145`
+- `BTC5M_ENTRY_EXITABILITY_MIN_ASK_DEPTH_SHARES=25`
+- `BTC5M_TAIL_FORCE_EXIT_SEC=60`
+- `BTC5M_MIN_SECONDS_AFTER_START=60`
+- `BTC5M_MIN_SECONDS_BEFORE_END=45`
+- `BTC5M_MIN_EDGE_BPS=600`
+- `BTC5M_MAX_SPREAD_PCT=0.03`
+- `BTC5M_MAX_ENTRY_PRICE=0.82`
+- `BTC5M_MIN_ASK_DEPTH_SHARES=10`
+- `BTC5M_MAX_OPEN_POSITIONS=1`
+- `BTC5M_MAX_NOTIONAL_USD=10`
+- `BTC5M_MIN_NOTIONAL_USD=5`
+- `BTC5M_PRE_SETTLE_LOSS_CAP_ENABLED=1`
 
-其余出场：
+## Notes
 
-- `take_profit = 20%`
-- `disaster_trail` 默认关闭
-- `stop_loss` 默认关闭，避免和尾盘梯度重复
+This is still paper-test work. The combined version is the first version that matches the current live Oracle setup.
 
-## 当前环境变量样板
-
-看 [`current_strategy.env.example`](./current_strategy.env.example)。
-
-## 当前纸上结果
-
-截至 `2026-05-17` 的纸上统计，当前版本还没有证明自己能稳定赚钱，但相比最早版本已经更收敛：
-
-- 全量新版本：`157` 笔，`66` 胜，胜率 `42.04%`，实现 PnL `-6.7389`
-- Plan A 窗口内：`127` 笔，`54` 胜，胜率 `42.52%`，实现 PnL `-1.3447`
-
-结论很简单：
-
-- 方向过滤是有效的
-- 尾盘亏损梯度能减少一部分直接吃满 `-10` 的情况
-- 但这版策略还没到可以直接放心放大的程度
-
-## 备注
-
-这个策略目前仍然是 paper-test 级别。尾盘亏损梯度是为了处理“快结束时直接判输归零”的尾部风险，不代表已经验证成长期稳定优势。
+The main open question is still the tail. The combined setup improves average results, but the worst single trade can still get close to `-10` if the market collapses too late.
