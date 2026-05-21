@@ -604,7 +604,7 @@ def run_once(db: sqlite3.Connection, poly: PolyClient, price: BinancePrice, tg: 
         summary["reason"] = "edge_too_small"
     elif (not trend_gate_enabled) and direction < min_direction:
         summary["reason"] = "weak_direction"
-    elif abs(direction) < _env_f("BTC5M_MIN_DIRECTION_BPS", 2.0):
+    elif abs(direction) < _env_f("BTC5M_S9C_MIN_ABS_DIRECTION_BPS", 2.0):
         summary["reason"] = "direction_too_weak"
     elif float(best["spread_pct"]) > max_spread:
         summary["reason"] = "spread_too_wide"
