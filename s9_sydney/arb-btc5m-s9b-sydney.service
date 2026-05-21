@@ -1,0 +1,15 @@
+[Unit]
+Description=Polymarket BTC 5m S9B Sydney edge-cap observer paper
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/poly-live-s5
+ExecStart=/home/ubuntu/poly-live-s5/run_s9b_sydney.sh
+Restart=on-failure
+RestartSec=15
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
