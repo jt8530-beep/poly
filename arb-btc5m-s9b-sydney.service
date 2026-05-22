@@ -1,15 +1,18 @@
 [Unit]
-Description=Polymarket BTC 5m S9B Sydney edge-cap observer paper
+Description=Polymarket BTC 5m S9B live trader
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/home/ubuntu/poly-live-s5
-ExecStart=/home/ubuntu/poly-live-s5/run_s9b_sydney.sh
-Restart=on-failure
-RestartSec=15
+EnvironmentFile=/home/ubuntu/.config/arb-btc5m-live-s9b.env
+ExecStart=/home/ubuntu/poly-live-s5/.venv/bin/python -m btc5m_strategy.arb.btc5m_live_s9b
+Restart=always
+RestartSec=10
 Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/home/ubuntu/poly-live-s5/s9b_live.log
+StandardError=append:/home/ubuntu/poly-live-s5/s9b_live.log
 
 [Install]
 WantedBy=default.target
