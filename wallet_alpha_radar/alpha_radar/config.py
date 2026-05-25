@@ -9,23 +9,52 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+def _clean(v: str | None) -> str:
+    """
+    Strip inline `#` comments + surrounding whitespace.
+
+    systemd's EnvironmentFile passes the entire line after `=` to the process,
+    including any inline comment. Bare `os.getenv` therefore sees strings like
+    "60   # seconds between polls" instead of "60", and int()/float() blow up.
+    Stripping defensively here means the same .env file works whether sourced
+    via systemd, `set -a; source .env`, or a Python loader.
+    """
+    if v is None:
+        return ""
+    s = v
+    # only treat `#` as a comment if it's preceded by whitespace, so that
+    # legitimate values containing `#` (e.g. URLs, hex hashes) still survive.
+    cut = -1
+    for i, ch in enumerate(s):
+        if ch == "#" and (i == 0 or s[i - 1].isspace()):
+            cut = i
+            break
+    if cut >= 0:
+        s = s[:cut]
+    return s.strip()
+
+
 def _env_f(name: str, default: float) -> float:
-    v = os.getenv(name)
-    return float(v) if v not in (None, "") else default
+    v = _clean(os.getenv(name))
+    return float(v) if v else default
 
 def _env_i(name: str, default: int) -> int:
-    v = os.getenv(name)
-    return int(v) if v not in (None, "") else default
+    v = _clean(os.getenv(name))
+    return int(v) if v else default
 
 def _env_s(name: str, default: str = "") -> str:
-    v = os.getenv(name)
-    return v if v is not None else default
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    cleaned = _clean(raw)
+    # for string values, an empty result after cleaning means "use default"
+    return cleaned if cleaned else default
 
 def _env_b(name: str, default: bool) -> bool:
-    v = os.getenv(name)
-    if v is None or v == "":
+    v = _clean(os.getenv(name))
+    if not v:
         return default
-    return v.strip().lower() in ("1", "true", "yes", "y", "on")
+    return v.lower() in ("1", "true", "yes", "y", "on")
 
 
 @dataclass
