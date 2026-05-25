@@ -1,0 +1,17 @@
+[Unit]
+Description=Wallet Alpha Radar - A-tier wallet trade tail recorder (Phase 2 prereq)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poly/wallet_alpha_radar
+EnvironmentFile=-/opt/poly/wallet_alpha_radar/.env
+ExecStart=/usr/bin/python3 scripts/05_record_wallet_trades.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

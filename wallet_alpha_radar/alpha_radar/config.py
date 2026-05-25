@@ -95,6 +95,42 @@ class RecorderConfig:
 
 
 @dataclass
+class TradeTailConfig:
+    # which wallets to tail — read from wallet_scores.csv where tier in tiers
+    scores_path:      str   = _env_s("WAR_TT_SCORES", "data/wallet_scores.csv")
+    output_path:      str   = _env_s("WAR_TT_OUTPUT", "data/wallet_trades_tail.csv")
+    tiers:            tuple = tuple(t.strip().upper()
+                                     for t in _env_s("WAR_TT_TIERS", "A").split(",")
+                                     if t.strip())
+    interval_sec:     int   = _env_i("WAR_TT_INTERVAL", 60)
+    fetch_limit:      int   = _env_i("WAR_TT_FETCH_LIMIT", 100)
+
+
+@dataclass
+class BacktestConfig:
+    # which trades to score — "tail" (forward-recorded), "history" (Phase-1
+    # historical), or "both" (union, deduped by tx hash)
+    trade_source:     str   = _env_s("WAR_BT_SOURCE", "both")
+    trades_tail_path: str   = _env_s("WAR_BT_TAIL", "data/wallet_trades_tail.csv")
+    history_path:     str   = _env_s("WAR_BT_HISTORY", "data/wallet_trade_history.csv")
+    snapshot_dir:     str   = _env_s("WAR_BT_SNAPSHOTS", "data/orderbook")
+    output_per_trade: str   = _env_s("WAR_BT_TRADES_OUT", "data/wallet_follow_simulated.csv")
+    output_summary:   str   = _env_s("WAR_BT_SUMMARY_OUT", "data/wallet_follow_backtest.csv")
+    # delays in seconds to simulate
+    delays_sec:       tuple = tuple(int(x) for x in _env_s("WAR_BT_DELAYS", "60,300,1800").split(","))
+    # copyable thresholds (the actual real-money gates we'd use later)
+    max_slip_cents:   float = _env_f("WAR_BT_MAX_SLIP", 0.03)
+    max_spread:       float = _env_f("WAR_BT_MAX_SPREAD", 0.05)
+    min_depth_usd:    float = _env_f("WAR_BT_MIN_DEPTH", 30.0)
+    # if no snapshot within this many seconds of the target time, mark as "no_snapshot"
+    snap_max_gap_sec: int   = _env_i("WAR_BT_MAX_GAP", 90)
+    # wallets to include (filter by tier, "*" = no filter)
+    tiers:            tuple = tuple(t.strip().upper()
+                                     for t in _env_s("WAR_BT_TIERS", "A").split(",")
+                                     if t.strip())
+
+
+@dataclass
 class Config:
     data_dir: str = _env_s("WAR_DATA_DIR", "data")
     log_level: str = _env_s("WAR_LOG_LEVEL", "INFO")
@@ -104,6 +140,8 @@ class Config:
     history:    HistoryConfig    = field(default_factory=HistoryConfig)
     scoring:    ScoringConfig    = field(default_factory=ScoringConfig)
     recorder:   RecorderConfig   = field(default_factory=RecorderConfig)
+    tradetail:  TradeTailConfig  = field(default_factory=TradeTailConfig)
+    backtest:   BacktestConfig   = field(default_factory=BacktestConfig)
 
 
 def load() -> Config:
