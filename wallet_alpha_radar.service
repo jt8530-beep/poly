@@ -1,0 +1,18 @@
+[Unit]
+Description=Wallet Alpha Radar - Polymarket orderbook recorder (Phase 2 prereq)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poly/wallet_alpha_radar
+EnvironmentFile=-/opt/poly/wallet_alpha_radar/.env
+ExecStart=/usr/bin/python3 scripts/04_record_orderbook.py
+Restart=always
+RestartSec=10
+# don't let logs balloon
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
