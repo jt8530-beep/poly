@@ -122,13 +122,19 @@ def compute_metrics(rows: list[dict]) -> dict:
                 "resolved": r.get("resolved") == "1",
                 "winning_outcome_index": r.get("winning_outcome_index"),
                 "category": r.get("category") or "",
+                "event_slug": r.get("event_slug") or "",
             })
 
         if side == "BUY" and 0.0 < price <= 1.0 and size > 0:
             buy_prices_weighted.append((price, size))
 
     # --- per-group settled PnL
-    settled_pnls: list[tuple[float, float, str, str]] = []   # (ts, pnl, condition_id, category)
+    # cluster := category if non-empty else event_slug else "unknown"
+    # We use cluster (not raw category) for specialization scoring because gamma
+    # /markets does not populate the `category` field — it lives on /events. The
+    # event_slug groups markets within one event (e.g. all NBA-finals-2026 sub-
+    # markets) which is a reasonable proxy for "specialty area".
+    settled_pnls: list[tuple[float, float, str, str]] = []   # (ts, pnl, condition_id, cluster)
     settled_trades_count = 0
     last_ts_per_group: dict[tuple[str, str], float] = {}
 
@@ -160,11 +166,16 @@ def compute_metrics(rows: list[dict]) -> dict:
         result = fifo_pnl(trades, resolved=resolved, won=won)
         last_ts_per_group[(cid, aid)] = max(t["ts"] for t in trades)
 
+        # cluster: category > event_slug > "unknown"
+        cluster = (meta.get("category") or "").strip()
+        if not cluster or cluster.lower() == "uncategorized":
+            cluster = (meta.get("event_slug") or "").strip() or "unknown"
+
         # only count as a "settled trade" if the market actually resolved
         if resolved:
             settled_trades_count += result["n_buys"] + result["n_sells"]
             settled_pnls.append(
-                (last_ts_per_group[(cid, aid)], result["pnl"], cid, meta.get("category") or "")
+                (last_ts_per_group[(cid, aid)], result["pnl"], cid, cluster)
             )
 
     total_pnl = sum(p for _, p, _, _ in settled_pnls)
@@ -208,21 +219,24 @@ def compute_metrics(rows: list[dict]) -> dict:
     hedged_events = sum(1 for s in yes_no_per_event.values() if len(s) >= 2)
     hedge_ratio = _safe_div(hedged_events, total_events)
 
-    # --- top category
+    # --- top cluster (formerly "category" — now category-OR-event_slug fallback)
     cat_pnl: dict[str, float] = defaultdict(float)
     cat_settled: dict[str, int] = defaultdict(int)
     cat_volume: dict[str, float] = defaultdict(float)
     cat_30d_pnl: dict[str, float] = defaultdict(float)
-    for ts, p, _, cat in settled_pnls:
-        c = cat or "Uncategorized"
+    for ts, p, _, cluster in settled_pnls:
+        c = cluster or "unknown"
         cat_pnl[c] += p
         cat_settled[c] += 1
         if ts >= cutoff_30d:
             cat_30d_pnl[c] += p
-    # rough category volume by re-walking rows
+    # rough cluster volume by re-walking rows (use same fallback logic)
     for r in rows:
         if r.get("resolved") == "1":
-            cat_volume[r.get("category") or "Uncategorized"] += _f(r.get("usd_size"))
+            c = (r.get("category") or "").strip()
+            if not c or c.lower() == "uncategorized":
+                c = (r.get("event_slug") or "").strip() or "unknown"
+            cat_volume[c] += _f(r.get("usd_size"))
     top_cat = max(cat_settled, key=lambda k: cat_settled[k]) if cat_settled else ""
     top_cat_settled = cat_settled.get(top_cat, 0)
     top_cat_pnl = cat_pnl.get(top_cat, 0.0)
@@ -331,7 +345,10 @@ def score(m: dict, scfg) -> tuple[float, dict]:
 def tier_for(score_val: float, hard_pass: bool, m: dict, scfg) -> str:
     if not hard_pass:
         return "C"
-    if score_val >= scfg.tier_a_min and m["last_30d_pnl"] > 0:
+    # Tier A requires BOTH lifetime AND last-30d positive PnL. The lifetime
+    # gate kicks out wallets that lost large amounts long-term but happen to
+    # have a recently positive month — those are usually variance, not edge.
+    if score_val >= scfg.tier_a_min and m["last_30d_pnl"] > 0 and m["total_pnl"] > 0:
         return "A"
     if score_val >= scfg.tier_b_min:
         return "B"
