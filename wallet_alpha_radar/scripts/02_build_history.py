@@ -177,7 +177,10 @@ def _normalize_trade(trade: dict, wallet: str, market: dict | None) -> dict | No
 
     outcome_idx = _outcome_index_from_trade(trade, market)
     win_idx = _winning_outcome_index(market) if market else None
-    resolved = bool(market and (market.get("closed") or market.get("resolved")) and win_idx is not None)
+    # _winning_outcome_index returns a value only when there's a definitive
+    # winner (explicit field OR outcomePrices showing 1.0). Treat that alone
+    # as resolved; the `closed` flag is sometimes lagging on gamma.
+    resolved = bool(market and win_idx is not None)
     won = (resolved and outcome_idx is not None and outcome_idx == win_idx) if resolved else None
 
     return {
