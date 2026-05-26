@@ -104,7 +104,13 @@ class ApiClient:
         return out
 
     def get_event_by_slug(self, slug: str) -> dict | None:
-        resp = self._get(self.cfg.gamma_url, "/events", {"slug": slug, "closed": "false"})
+        """
+        Fetch event by slug regardless of closed state. We deliberately omit
+        the `closed` filter so the paper trader can resolve positions whose
+        underlying events have just settled — `closed=false` would return
+        nothing for those, and the trader would never realize the PnL.
+        """
+        resp = self._get(self.cfg.gamma_url, "/events", {"slug": slug})
         if isinstance(resp, list) and resp:
             return resp[0]
         return None

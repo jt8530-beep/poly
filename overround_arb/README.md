@@ -57,10 +57,16 @@ overround_arb/
 │   └── util.py      logging + CSV helpers
 ├── scripts/
 │   ├── 00_health_check.py   diagnostic
-│   └── 01_scan_events.py    main scanner — one-shot
+│   ├── 01_scan_events.py    main scanner — one-shot
+│   ├── 07_paper_trade.py    long-running paper trader (Phase 2)
+│   └── 08_paper_report.py   offline PnL / win-rate report
 └── data/
     ├── overround_opportunities.csv   latest snapshot (overwritten each run)
-    └── scan_history.csv              append mode (only if OA_APPEND_HISTORY=1)
+    ├── scan_history.csv              append mode (only if OA_APPEND_HISTORY=1)
+    ├── paper_positions.csv           paper trader: open + closed positions
+    ├── paper_position_legs.csv       paper trader: per-market entry legs
+    ├── paper_trades_closed.csv       paper trader: realized PnL log
+    └── paper_position_mtm.jsonl      paper trader: per-cycle MtM snapshots
 ```
 
 ## Run
@@ -90,6 +96,49 @@ Then check progress any time:
 ```bash
 python3 scripts/00_health_check.py
 ```
+
+## Paper trading (Phase 2)
+
+To actually verify whether the printed scanner edge survives the round
+trip, run the paper trader. It opens simulated $100 baskets on every
+flagged opportunity that passes a stricter filter, refreshes MtM every
+10 minutes via gamma, and closes on settlement / take-profit / stop-loss.
+
+```bash
+# scanner must run periodically — paper trader reads its CSV
+*/30 * * * * cd /opt/poly/overround_arb && \
+    python3 scripts/01_scan_events.py >> /var/log/overround_arb_scan.log 2>&1
+
+# paper trader runs as a service
+sudo cp /opt/poly/overround_arb_paper.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now overround_arb_paper
+
+# stats any time
+python3 scripts/08_paper_report.py
+```
+
+Position math (per simulated trade):
+* Budget: `OA_PT_BUDGET` (default $100)
+* Buy `basket_units = budget / total_ask_at_entry` shares of every YES outcome
+* On settlement, basket pays `basket_units` × $1 (since exactly one outcome wins)
+* Realized PnL = `basket_units − cost = budget × ((1 / total_ask) − 1)`
+
+Exit triggers:
+* `settled` — event closed, payout based on which outcome won
+* `take_profit` — MtM bid >= cost × (1 + `OA_PT_TP`)
+* `stop_loss` — MtM bid <= cost × (1 − `OA_PT_SL`); disabled by default for arb-class
+* `force_close` — within `OA_PT_FORCE_CLOSE_DAYS` of end_date, sell at MtM bid
+
+What this paper trader does NOT model:
+* gas / Polygon transaction fees on Polymarket basket buy
+* slippage beyond top-of-book (basket_units could exceed depth)
+* CLOB API rate limits during active trading
+* opportunity cost of capital tied up across long horizons
+
+For pre-real-money validation it's good enough — if the paper trader
+shows positive ROI across 50+ trades, real-money trading might work; if
+it doesn't, you definitely shouldn't try.
 
 ## Output schema (`data/overround_opportunities.csv`)
 
