@@ -1,0 +1,11 @@
+# Local config (real values may live here, never commit)
+.env
+
+# Scanner output — written every run
+data/overround_opportunities.csv
+data/scan_history.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
