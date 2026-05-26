@@ -74,6 +74,24 @@ class ScanConfig:
     # drops as horizon grows since you can't easily redeploy.
     max_days_to_end:      float = _env_f("LP_MAX_DAYS", 365.0)
 
+    # ----- v2: tag-based filtering (LESSON FROM 2026-05-26 PLTR LOSS) -----
+    # Tags whose presence flag a market as "underlying-volatility-driven" — even
+    # if scanner shows wide spread + thin competition, the spread isn't
+    # opportunity, it's a risk premium. PLTR/AAPL/EWY-style equity-derivative
+    # markets bleed inventory overnight on any earnings/news/macro move; we
+    # paid \$5.90 to learn this. See POSTMORTEM.md for the full breakdown.
+    blacklist_tags:       tuple = tuple(t.strip() for t in _env_s("LP_BLACKLIST_TAGS",
+        "Finance,Stocks,Equity,ETF,ETFs,Macro,Crypto Prices,Hit Price,Politics,"
+        "Election,Elections,FX,Forex,Bonds,Commodities,Energy,Interest Rates"
+    ).split(",") if t.strip())
+    # If non-empty, ONLY keep markets whose tags include at least one of these.
+    # Default empty (=permissive) but recommended setting:
+    #   Esports,Games,Sports,Weather
+    whitelist_tags:       tuple = tuple(t.strip() for t in _env_s("LP_WHITELIST_TAGS", "").split(",") if t.strip())
+    # If 1, hard-skip events whose volume is too high for "dead zone" plays.
+    # Big-volume events typically have professional MMs in them.
+    max_event_volume_usd: float = _env_f("LP_MAX_EVENT_VOLUME", 0.0)  # 0 = no cap
+
     # Suggested order parameters (output, used to estimate capital required)
     # We'll suggest placing orders within this fraction of rewardsMaxSpread
     # toward the mid. 0.9 = "just inside the reward band" so we capture

@@ -78,6 +78,17 @@ def _event_tags(event: dict) -> list[str]:
     return out
 
 
+def _tag_match(tags: list[str], filter_tags: tuple) -> bool:
+    """Case-insensitive: True if any tag in `tags` matches any filter."""
+    if not filter_tags:
+        return False
+    tags_lower = {t.lower() for t in tags}
+    for f in filter_tags:
+        if f.lower() in tags_lower:
+            return True
+    return False
+
+
 def _daily_rate(market: dict) -> float:
     """Sum rewardsDailyRate across all clobRewards entries (per-asset)."""
     cr = market.get("clobRewards") or []
@@ -94,6 +105,16 @@ def analyze_market(event: dict, market: dict, scfg, now_unix: float) -> dict | N
     # --- need a real reward pool
     daily_rate = _daily_rate(market)
     if daily_rate < scfg.min_daily_rate_usd:
+        return None
+
+    # --- v2: tag-based filtering (gate before any expensive analysis)
+    tags = _event_tags(event)
+    if scfg.blacklist_tags and _tag_match(tags, scfg.blacklist_tags):
+        return None
+    if scfg.whitelist_tags and not _tag_match(tags, scfg.whitelist_tags):
+        return None
+    # cap on event volume — big events have pro market makers
+    if scfg.max_event_volume_usd > 0 and _f(event.get("volume")) > scfg.max_event_volume_usd:
         return None
 
     max_spread_cents = _f(market.get("rewardsMaxSpread"))
@@ -205,6 +226,15 @@ def main() -> int:
 
     log.info("scanning events: max_pages=%d page_size=%d  min_daily_rate=$%.0f",
              scfg.events_max_pages, scfg.events_page_size, scfg.min_daily_rate_usd)
+    if scfg.blacklist_tags:
+        log.info("  blacklist tags: %s", ", ".join(scfg.blacklist_tags[:8])
+                 + ("..." if len(scfg.blacklist_tags) > 8 else ""))
+    if scfg.whitelist_tags:
+        log.info("  whitelist tags: %s (only events with at least one match)",
+                 ", ".join(scfg.whitelist_tags))
+    else:
+        log.warning("  no whitelist set — recommend setting LP_WHITELIST_TAGS=Esports,Games,Sports,Weather "
+                    "to avoid equity-derivative traps (POSTMORTEM.md)")
 
     events = api.iter_events(page_size=scfg.events_page_size,
                              max_pages=scfg.events_max_pages)
