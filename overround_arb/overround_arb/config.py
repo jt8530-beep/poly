@@ -4,11 +4,65 @@ Config for Overround Arb scanner. Env-driven, stdlib only.
 Same _clean() trick as wallet_alpha_radar/alpha_radar/config.py — strips
 inline `#` comments so a `KEY=value   # comment` line works regardless of
 whether the .env is sourced via systemd, docker, dotenv, etc.
+
+This module ALSO loads `<package>/../.env` at import time so that values in
+.env are honored when scripts are run directly via `python3 scripts/...`.
+Without this, only systemd's EnvironmentFile would actually source the file
+and `os.getenv()` would silently fall back to defaults — same bug as
+lp_market_maker (2026-05-26 PLTR loss postmortem).
 """
 from __future__ import annotations
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# .env loader (called at MODULE level — see comment below)
+# ---------------------------------------------------------------------------
+def _load_dotenv() -> int:
+    """
+    Read `<package>/../.env` (e.g. `overround_arb/.env`) and inject any
+    KEY=VALUE pairs into os.environ that aren't already set there.
+
+    `not already set` is critical: if the process was launched by systemd
+    with `EnvironmentFile=`, those values are already in os.environ and we
+    must not overwrite them. This way the same code works for:
+      * `python3 scripts/X.py`  → loads .env from this loader
+      * `systemctl start X`     → loads .env via systemd, this loader is no-op
+
+    Returns the count of vars actually injected (for diagnostics).
+    """
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if not env_path.exists():
+        return 0
+    n = 0
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#") or "=" not in s:
+                continue
+            key, _, val = s.partition("=")
+            key = key.strip()
+            val = val.strip()
+            if len(val) >= 2 and (
+                (val.startswith('"') and val.endswith('"')) or
+                (val.startswith("'") and val.endswith("'"))):
+                val = val[1:-1]
+            if key and key not in os.environ:
+                os.environ[key] = val
+                n += 1
+    except Exception as e:                                        # noqa: BLE001
+        logging.getLogger("oa.config").warning(".env load failed: %s", e)
+    return n
+
+
+# CRITICAL: this MUST run before the @dataclass class bodies below are
+# evaluated, because dataclass field defaults like `_env_s("OA_X", "")` are
+# computed at class-definition time (i.e. at import). If we deferred this
+# to load() like a naive impl, the env values would be loaded too late.
+_LOADED_DOTENV_COUNT = _load_dotenv()
 
 
 def _clean(v: str | None) -> str:
@@ -138,4 +192,10 @@ class Config:
 def load() -> Config:
     cfg = Config()
     Path(cfg.data_dir).mkdir(parents=True, exist_ok=True)
+    if _LOADED_DOTENV_COUNT:
+        logging.getLogger("oa.config").info(
+            ".env loaded: %d vars from %s",
+            _LOADED_DOTENV_COUNT,
+            Path(__file__).resolve().parent.parent / ".env",
+        )
     return cfg
