@@ -1,0 +1,4 @@
+# Wallet Alpha Radar — Phase 1 has zero third-party dependencies on purpose.
+# Stdlib only. Same approach as btc5m_strategy.
+#
+# Tested with python 3.10+
