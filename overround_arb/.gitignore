@@ -1,0 +1,17 @@
+# Local config (real values may live here, never commit)
+.env
+
+# Scanner output — written every run
+data/overround_opportunities.csv
+data/scan_history.csv
+
+# Paper trader state — never commit (these are simulated PnL logs)
+data/paper_positions.csv
+data/paper_position_legs.csv
+data/paper_trades_closed.csv
+data/paper_position_mtm.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

@@ -1,0 +1,17 @@
+[Unit]
+Description=Overround Arb - paper trader (simulated, no real money)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/poly/overround_arb
+EnvironmentFile=-/opt/poly/overround_arb/.env
+ExecStart=/usr/bin/python3 scripts/07_paper_trade.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Overround Arb scanner — stdlib only on purpose, same convention as
+# btc5m_strategy and wallet_alpha_radar.
+#
+# Tested with Python 3.10+
