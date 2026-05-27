@@ -1,0 +1,2 @@
+# LP Market Maker — stdlib only on purpose, same convention as the rest of
+# this repo. Tested on Python 3.10+

@@ -1,0 +1,10 @@
+# Local config (real values — never commit)
+.env
+
+# Scanner output
+data/lp_opportunities.csv
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
