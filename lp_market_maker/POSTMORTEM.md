@@ -116,3 +116,57 @@ them. The qualitative filter was missing.
 * No deployment recommendation during US market hours for any
   equity-adjacent market.
 * No three-step manual deploy without Phase 1 atomic executor.
+
+
+
+---
+
+## Update 2026-05-26 16:49 UTC: PLTR closed, v2 not strict enough
+
+PLTR `LIMIT SELL @ 7.5¢ × 50` filled at 16:49:20 UTC.
+
+Realized PnL: 49.99 × 0.075 = $3.75 ;  cost $5.90 ;  **realized loss = −$2.15**.
+Better than worst-case −$5.90 hold-to-settle. The SELL order earned the
+LP-time-on-book between 14:30 and 16:49 (≈2h20m) — whether reward credit
+shows up in `/activity` is TBD (no REWARD entries yet, may need direct
+`/rewards` endpoint research).
+
+WorkBuddy then ran scanner v2 with `LP_WHITELIST_TAGS=Esports,Games,Sports,Weather`
+and discovered v2 is still leaky: top-19 results included MLB / NHL /
+Tennis / Soccer markets, because **traditional sports markets are tagged
+with both `Sports` AND `Games`**, and we whitelisted both.
+
+### v2.1 (this update)
+
+* Whitelist tightened to `Esports,Weather` only. `Games` removed (catches
+  trad sports), `Sports` removed (catches everything).
+* Blacklist extended with traditional sports leagues:
+  `MLB, NHL, NBA, NFL, Soccer, Tennis, Cricket, Football, Baseball, Hockey,
+  Premier League, La Liga, Bundesliga, Serie A, Ligue 1, Champions League`.
+
+### Why this matters (per user question)
+
+> 体育中场休息和电竞中场逻辑一样吗？
+
+**No.** Esports digital game state can be *fully paused* — no new info
+flows during the break. Traditional sports half-time is dense
+public re-evaluation (first-half score, momentum, key player stats,
+injuries) — sharp money repositions, prediction price moves. The "dead
+zone" assumption only holds for esports.
+
+### Open question for v3
+
+Some valid plays may live in `Cricket innings break` or `Tennis between
+sets` (lower volume, less re-evaluation than NBA/NFL halftime). v2.1
+blacklists them defensively; if real PnL data later shows they're fine,
+loosen selectively. For now: tight is right.
+
+### Score so far
+
+| | $ |
+|---|---|
+| Total LP capital deployed | $5.90 |
+| Realized loss | $2.15 |
+| LP rewards earned | $0 (or unknown — endpoint research pending) |
+| Net | **−$2.15** |
+| Lessons banked | 7 (PLTR root cause + v2 leak + sports vs esports + reward endpoint gap + 4 from v0 postmortem) |
